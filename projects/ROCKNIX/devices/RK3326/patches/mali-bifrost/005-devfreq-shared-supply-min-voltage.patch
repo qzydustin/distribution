@@ -1,0 +1,23 @@
+vdd_logic is shared with the DDR controller. Request the OPP voltage as
+a minimum, as the vendor kernel does, so the two do not block each other.
+
+--- a/product/kernel/drivers/gpu/arm/midgard/backend/gpu/mali_kbase_devfreq.c
++++ b/product/kernel/drivers/gpu/arm/midgard/backend/gpu/mali_kbase_devfreq.c
+@@ -165,7 +165,7 @@
+ 	for (i = 0; i < kbdev->nr_clocks; i++) {
+ 		if (kbdev->regulators[i] && kbdev->current_voltages[i] != volts[i] &&
+ 		    kbdev->current_freqs[i] < freqs[i]) {
+-			err = regulator_set_voltage(kbdev->regulators[i], volts[i], volts[i]);
++			err = regulator_set_voltage(kbdev->regulators[i], volts[i], INT_MAX);
+ 			if (!err) {
+ 				kbdev->current_voltages[i] = volts[i];
+ 			} else {
+@@ -199,7 +199,7 @@
+ 	for (i = 0; i < kbdev->nr_clocks; i++) {
+ 		if (kbdev->regulators[i] && kbdev->current_voltages[i] != volts[i] &&
+ 		    original_freqs[i] > freqs[i]) {
+-			err = regulator_set_voltage(kbdev->regulators[i], volts[i], volts[i]);
++			err = regulator_set_voltage(kbdev->regulators[i], volts[i], INT_MAX);
+ 			if (!err) {
+ 				kbdev->current_voltages[i] = volts[i];
+ 			} else {
