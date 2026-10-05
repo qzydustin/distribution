@@ -460,6 +460,11 @@
     status = "okay";
 };
 
+&bus_apll {
+    bus-supply = <&vdd_logic>;
+    status = "okay";
+};
+
 &gpu {
     mali-supply = <&vdd_logic>;
     status = "okay";

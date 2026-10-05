@@ -1,0 +1,167 @@
+From 37d55ff12d39cd5a19641f01275c91292b8754fd Mon Sep 17 00:00:00 2001
+From: Zhenyu Qi <qzydustin@hotmail.com>
+Date: Mon, 5 Oct 2026 12:55:37 -0700
+Subject: [PATCH] soc: rockchip: add a PX30 logic voltage driver
+
+On PX30 and RK3326 the logic supply must rise with the CPU clock: the
+vendor kernel's "rockchip,px30-bus" clkfreq policy keeps vdd_logic at
+1.0 V while the CPU PLL runs above 1008 MHz. Without it, once the GPU
+and DDR scale down vdd_logic drops to 0.95 V under a fast CPU, and the
+audio path picks up noise, latency and crackles.
+
+Follow the CPU PLL with a clock notifier and request the voltage of the
+lowest OPP at or above its rate as a minimum: raised before the clock
+goes up, lowered after it went down.
+---
+ drivers/soc/rockchip/Kconfig    |   8 +++
+ drivers/soc/rockchip/Makefile   |   1 +
+ drivers/soc/rockchip/px30-bus.c | 111 ++++++++++++++++++++++++++++++++
+ 3 files changed, 120 insertions(+)
+ create mode 100644 drivers/soc/rockchip/px30-bus.c
+
+diff --git a/drivers/soc/rockchip/Kconfig b/drivers/soc/rockchip/Kconfig
+index 32ccb7f..96568f4 100644
+--- a/drivers/soc/rockchip/Kconfig
++++ b/drivers/soc/rockchip/Kconfig
+@@ -51,4 +51,12 @@ config ROCKCHIP_DTPM
+ 	  on this platform. That will create all the power capping capable
+ 	  devices.
+ 
++config ROCKCHIP_PX30_BUS
++	tristate "Rockchip PX30 logic voltage for the CPU clock"
++	depends on OF && REGULATOR && PM_OPP
++	help
++	  On PX30 and RK3326 the logic supply has to rise with the CPU
++	  clock. This driver follows the CPU PLL and keeps the logic supply
++	  at the voltage the OPP table gives for its rate.
++
+ endif
+diff --git a/drivers/soc/rockchip/Makefile b/drivers/soc/rockchip/Makefile
+index 07b4bd3..52c3586 100644
+--- a/drivers/soc/rockchip/Makefile
++++ b/drivers/soc/rockchip/Makefile
+@@ -7,3 +7,4 @@ obj-$(CONFIG_ROCKCHIP_CPUINFO) += rockchip-cpuinfo.o
+ obj-$(CONFIG_ROCKCHIP_PM_CONFIG) += rockchip-pm-config.o
+ obj-$(CONFIG_ROCKCHIP_IODOMAIN) += io-domain.o
+ obj-$(CONFIG_ROCKCHIP_DTPM) += dtpm.o
++obj-$(CONFIG_ROCKCHIP_PX30_BUS) += px30-bus.o
+diff --git a/drivers/soc/rockchip/px30-bus.c b/drivers/soc/rockchip/px30-bus.c
+new file mode 100644
+index 0000000..ce7ac2b
+--- /dev/null
++++ b/drivers/soc/rockchip/px30-bus.c
+@@ -0,0 +1,111 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * PX30/RK3326: the logic supply (vdd_logic) has to rise with the CPU clock.
++ * Follow the CPU PLL and ask for the voltage of the lowest OPP at or above
++ * its rate, as a minimum, like the vendor kernel's "clkfreq" bus policy.
++ */
++
++#include <linux/clk.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/pm_opp.h>
++#include <linux/regulator/consumer.h>
++
++struct px30_bus {
++	struct device *dev;
++	struct regulator *vdd;
++	struct notifier_block nb;
++	unsigned long volt;
++};
++
++static int px30_bus_set_rate(struct px30_bus *bus, unsigned long rate)
++{
++	struct dev_pm_opp *opp;
++	unsigned long volt;
++	int ret;
++
++	opp = dev_pm_opp_find_freq_ceil(bus->dev, &rate);
++	if (IS_ERR(opp))
++		opp = dev_pm_opp_find_freq_floor(bus->dev, &rate);
++	if (IS_ERR(opp))
++		return PTR_ERR(opp);
++	volt = dev_pm_opp_get_voltage(opp);
++	dev_pm_opp_put(opp);
++
++	if (volt == bus->volt)
++		return 0;
++
++	ret = regulator_set_voltage(bus->vdd, volt, INT_MAX);
++	if (!ret)
++		bus->volt = volt;
++	return ret;
++}
++
++static int px30_bus_notify(struct notifier_block *nb, unsigned long event,
++			   void *data)
++{
++	struct px30_bus *bus = container_of(nb, struct px30_bus, nb);
++	struct clk_notifier_data *cnd = data;
++	int ret = 0;
++
++	/* Raise before the clock goes up, lower after it went down */
++	if (event == PRE_RATE_CHANGE && cnd->new_rate > cnd->old_rate)
++		ret = px30_bus_set_rate(bus, cnd->new_rate);
++	else if (event == POST_RATE_CHANGE && cnd->new_rate < cnd->old_rate)
++		px30_bus_set_rate(bus, cnd->new_rate);
++	else if (event == ABORT_RATE_CHANGE)
++		px30_bus_set_rate(bus, cnd->old_rate);
++
++	return notifier_from_errno(ret);
++}
++
++static int px30_bus_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct px30_bus *bus;
++	struct clk *clk;
++	int ret;
++
++	bus = devm_kzalloc(dev, sizeof(*bus), GFP_KERNEL);
++	if (!bus)
++		return -ENOMEM;
++	bus->dev = dev;
++
++	clk = devm_clk_get(dev, "bus");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk), "no bus clock\n");
++
++	bus->vdd = devm_regulator_get(dev, "bus");
++	if (IS_ERR(bus->vdd))
++		return dev_err_probe(dev, PTR_ERR(bus->vdd), "no bus supply\n");
++
++	ret = devm_pm_opp_of_add_table(dev);
++	if (ret)
++		return dev_err_probe(dev, ret, "invalid operating points\n");
++
++	ret = px30_bus_set_rate(bus, clk_get_rate(clk));
++	if (ret)
++		return ret;
++
++	bus->nb.notifier_call = px30_bus_notify;
++	return devm_clk_notifier_register(dev, clk, &bus->nb);
++}
++
++static const struct of_device_id px30_bus_of_match[] = {
++	{ .compatible = "rockchip,px30-bus" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, px30_bus_of_match);
++
++static struct platform_driver px30_bus_driver = {
++	.probe	= px30_bus_probe,
++	.driver	= {
++		.name		= "px30-bus",
++		.of_match_table	= px30_bus_of_match,
++	},
++};
++module_platform_driver(px30_bus_driver);
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("PX30 logic voltage for the CPU clock");
+-- 
+2.55.0
+

@@ -6,6 +6,28 @@
 #include "px30.dtsi"
 
 / {
+	bus_apll: bus-apll {
+		compatible = "rockchip,px30-bus";
+		clocks = <&cru PLL_APLL>;
+		clock-names = "bus";
+		operating-points-v2 = <&bus_apll_opp_table>;
+		status = "disabled";
+	};
+
+	bus_apll_opp_table: opp-table-bus-apll {
+		compatible = "operating-points-v2";
+
+		opp-1008000000 {
+			opp-hz = /bits/ 64 <1008000000>;
+			opp-microvolt = <950000>;
+		};
+
+		opp-1512000000 {
+			opp-hz = /bits/ 64 <1512000000>;
+			opp-microvolt = <1000000>;
+		};
+	};
+
 	reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;
