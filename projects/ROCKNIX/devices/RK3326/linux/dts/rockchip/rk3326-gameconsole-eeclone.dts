@@ -431,7 +431,7 @@
         <&cru HCLK_BUS_PRE>, <&cru HCLK_PERI_PRE>,
         <&cru PCLK_BUS_PRE>, <&cru SCLK_GPU>;
 
-    assigned-clock-rates = <1188000000>,
+    assigned-clock-rates = <1040000000>,
         <200000000>, <200000000>,
         <150000000>, <150000000>,
         <100000000>, <200000000>;
@@ -479,6 +479,13 @@
 &gpu {
     mali-supply = <&vdd_logic>;
     status = "okay";
+};
+
+&gpu_opp_table {
+    opp-520000000 {
+        opp-hz = /bits/ 64 <520000000>;
+        opp-microvolt = <1175000>;
+    };
 };
 
 &i2c0 {

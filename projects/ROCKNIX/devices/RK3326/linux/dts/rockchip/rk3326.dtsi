@@ -86,18 +86,6 @@
 	};
 };
 
-&gpu_opp_table {
-	/delete-node/ opp-200000000;
-	/delete-node/ opp-300000000;
-	/delete-node/ opp-400000000;
-	/delete-node/ opp-480000000;
-
-	opp-560000000 {
-		opp-hz = /bits/ 64 <560000000>;
-		opp-microvolt = <1150000>;
-	};
-};
-
 &gpu {
 	clock-names = "bus";
 	resets = <&cru SRST_GPU>;
