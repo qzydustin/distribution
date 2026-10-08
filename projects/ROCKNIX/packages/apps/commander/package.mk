@@ -13,6 +13,18 @@ PKG_TOOLCHAIN="cmake"
 
 PKG_CMAKE_OPTS_TARGET+=" -DCMAKE_BUILD_TYPE=Release"
 
+pre_configure_target() {
+  # Our built-in pads are mapped by label in gamecontrollerdb, so the upstream
+  # defaults, which use SDL's positional names, land on the wrong buttons. The
+  # InputPlumber pad is mapped by position and keeps them.
+  if ! listcontains "${ADDITIONAL_PACKAGES}" "inputplumber"; then
+    export CXXFLAGS+=" -DCMDR_GAMEPAD_OPEN=ControllerButton::A \
+                       -DCMDR_GAMEPAD_PARENT=ControllerButton::B \
+                       -DCMDR_GAMEPAD_OPERATION=ControllerButton::X \
+                       -DCMDR_GAMEPAD_SYSTEM=ControllerButton::Y"
+  fi
+}
+
 makeinstall_target() {
   mkdir -p ${INSTALL}/usr/bin
     cp -a ${PKG_BUILD}/.${TARGET_NAME}/commander ${INSTALL}/usr/bin
